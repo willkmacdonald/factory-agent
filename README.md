@@ -153,6 +153,8 @@ factory-agent/
 │   ├── metrics.py          # Analysis functions (276 lines)
 │   ├── main.py             # CLI interface and chatbot (352 lines)
 │   └── dashboard.py        # Streamlit web dashboard (226 lines)
+├── tests/
+│   └── test_main.py        # Smoke tests for chat logic (175 lines)
 ├── data/
 │   └── production.json     # Generated synthetic data
 ├── run_dashboard.py        # Dashboard launcher script
@@ -164,7 +166,7 @@ factory-agent/
 └── README.md              # This file
 ```
 
-**Total implementation**: ~1,100 lines across 5 core modules
+**Total implementation**: ~1,100 lines across 5 core modules + 175 lines of tests
 
 ## How It Works
 
@@ -172,10 +174,20 @@ factory-agent/
 
 1. **Data Generation** (`src/data.py`): Creates 30 days of realistic factory data with planted scenarios
 2. **Metrics Engine** (`src/metrics.py`): Provides 4 analysis functions that process the data
-3. **CLI Interface** (`src/main.py`): Typer-based commands with Rich formatting
+3. **CLI Interface** (`src/main.py`): Typer-based commands with Rich formatting and reusable chat functions
 4. **Web Dashboard** (`src/dashboard.py`): Streamlit app with Plotly visualizations
 5. **Tool-Calling Pattern**: Claude receives tool definitions, calls them with arguments, and synthesizes responses
 6. **Conversation Loop**: Maintains history and handles multi-turn tool calling
+
+### Reusable Chat Functions (PR #3)
+
+The chatbot logic has been extracted into 3 reusable functions for sharing with voice interface:
+
+- `_build_system_prompt()`: Constructs system prompt with factory context
+- `_get_chat_response()`: Manages Claude API tool-calling loop, returns text and updated history
+- `execute_tool()`: Routes tool calls to metric functions
+
+These functions enable both text and voice interfaces to share the same chat logic.
 
 ### Architecture Flow
 
@@ -194,10 +206,19 @@ Both interfaces share the same underlying metrics engine and data storage, ensur
 This is a demo/prototype project built following simplicity-first principles:
 - **JSON files** instead of database (easier to inspect and debug)
 - **Synchronous I/O** (appropriate for single-user demos)
-- **No complex testing infrastructure** (manual testing sufficient)
+- **Smoke test coverage** (6 tests, 100% coverage of core chat functions)
 - **Shared metrics layer** (both interfaces use the same analysis functions)
 - **Streamlit for dashboards** (Python-native, zero JavaScript required)
 - **~1,100 lines total** (compact and maintainable)
+
+### Testing
+
+Run tests with pytest:
+```bash
+pytest tests/ -v
+```
+
+Current coverage: 6 smoke tests covering all extracted chat functions (`_build_system_prompt`, `_get_chat_response`, `execute_tool`)
 
 ### Design Philosophy
 - Chatbot for **exploratory analysis** and natural language queries

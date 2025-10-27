@@ -8,6 +8,9 @@ It handles user interaction, Claude API integration, and tool execution.
 from datetime import datetime
 from typing import Any, Dict, List
 import json
+import tempfile
+import wave
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -15,7 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from openai import OpenAI
 
-from .config import API_KEY, MODEL, FACTORY_NAME
+from .config import API_KEY, MODEL, FACTORY_NAME, RECORDING_DURATION
 from .data import initialize_data, data_exists, load_data, MACHINES
 from .metrics import (
     calculate_oee,
@@ -27,6 +30,76 @@ from .metrics import (
 # Initialize CLI app and console
 app = typer.Typer(help="Factory Operations Chatbot - Demo Application")
 console = Console()
+
+
+# Audio utility functions for voice interface
+def _record_audio(duration: int = 5) -> Path:
+    """Record audio using PyAudio (cross-platform).
+
+    Args:
+        duration: Recording duration in seconds
+
+    Returns:
+        Path to temporary WAV file
+    """
+    import pyaudio
+
+    CHUNK = 1024
+    FORMAT = pyaudio.paInt16
+    CHANNELS = 1
+    RATE = 16000  # Whisper-optimized sample rate
+
+    audio = pyaudio.PyAudio()
+    stream = audio.open(
+        format=FORMAT,
+        channels=CHANNELS,
+        rate=RATE,
+        input=True,
+        frames_per_buffer=CHUNK,
+    )
+
+    frames = []
+    for _ in range(0, int(RATE / CHUNK * duration)):
+        data = stream.read(CHUNK)
+        frames.append(data)
+
+    stream.stop_stream()
+    stream.close()
+    audio.terminate()
+
+    # Save to temp file
+    temp_file = Path(tempfile.mktemp(suffix=".wav"))
+    with wave.open(str(temp_file), "wb") as wf:
+        wf.setnchannels(CHANNELS)
+        wf.setsampwidth(audio.get_sample_size(FORMAT))
+        wf.setframerate(RATE)
+        wf.writeframes(b"".join(frames))
+
+    return temp_file
+
+
+def _play_audio(audio_file: Path) -> None:
+    """Play audio file using simpleaudio (cross-platform).
+
+    Args:
+        audio_file: Path to MP3 or WAV file
+    """
+    from pydub import AudioSegment
+    import simpleaudio as sa
+
+    # Load audio (handles MP3, WAV, etc.)
+    audio = AudioSegment.from_file(audio_file)
+
+    # Convert to WAV in memory for playback
+    playback = sa.play_buffer(
+        audio.raw_data,
+        num_channels=audio.channels,
+        bytes_per_sample=audio.sample_width,
+        sample_rate=audio.frame_rate,
+    )
+
+    # Wait for playback to finish
+    playback.wait_done()
 
 # Tool definitions for Claude
 TOOLS = [

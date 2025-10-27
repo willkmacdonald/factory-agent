@@ -6,7 +6,7 @@ It handles user interaction, Claude API integration, and tool execution.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 import json
 import tempfile
 import wave
@@ -198,8 +198,19 @@ def _build_system_prompt() -> str:
     Loads production data and constructs a complete system prompt for Claude
     with date range, available machines, and instructions for answering questions.
 
+    Code Flow:
+    1. Load production data from JSON via load_data()
+    2. Extract start_date and end_date, strip time component (keep YYYY-MM-DD)
+    3. Build comma-separated list of machine names from MACHINES constant
+    4. Construct system prompt with:
+       - Factory name and assistant role
+       - Available data range (30 days)
+       - Machine and shift information
+       - Instructions for tool usage and response formatting
+       - Current date context for relative date queries
+
     Returns:
-        Complete system prompt string with factory context
+        Complete system prompt string with factory context and guidelines
     """
     data = load_data()
     start_date = data["start_date"].split("T")[0]
@@ -230,12 +241,27 @@ def _get_chat_response(
     system_prompt: str,
     conversation_history: List[Dict[str, Any]],
     user_message: str,
-) -> str:
+) -> Tuple[str, List[Dict[str, Any]]]:
     """Get Claude response with tool calling support.
 
     Manages the complete tool-calling loop: sends message to Claude, executes
     any requested tools, and returns final text response. Handles multiple
     tool call iterations automatically.
+
+    Code Flow:
+    1. Build messages list: system prompt + conversation history + new user message
+    2. Enter tool-calling loop:
+       a. Send messages to Claude API with tool definitions
+       b. If Claude returns tool calls (not final answer):
+          - Append assistant message with tool_calls to messages
+          - Execute each requested tool via execute_tool()
+          - Append tool results to messages
+          - Loop back to step 2a with updated messages
+       c. If Claude returns text (no tool calls):
+          - Extract final assistant response
+          - Build updated history with all new messages (user + tool calls + assistant)
+          - Return response text and updated history
+    3. Caller must update their conversation_history with returned history
 
     Args:
         client: OpenAI client configured for OpenRouter
@@ -244,12 +270,17 @@ def _get_chat_response(
         user_message: Current user message to process
 
     Returns:
-        Final assistant response text after all tool calls complete
+        Tuple of (response_text, updated_history):
+        - response_text: Final assistant response text after all tool calls complete
+        - updated_history: New messages to append (user msg, tool calls, assistant msg)
     """
     # Build messages list with system prompt, history, and new message
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(conversation_history)
     messages.append({"role": "user", "content": user_message})
+
+    # Track where new messages start (after existing history)
+    history_start_index = len(messages) - 1  # Index of new user message
 
     # Tool calling loop - continues until Claude provides final answer
     while True:
@@ -261,7 +292,11 @@ def _get_chat_response(
 
         # If no tool calls, we have the final answer
         if not message.tool_calls:
-            return message.content
+            # Extract new messages added during this conversation turn
+            new_history = messages[history_start_index:]
+            # Add final assistant response
+            new_history.append({"role": "assistant", "content": message.content})
+            return message.content, new_history
 
         # Add assistant message with tool calls to history
         messages.append(message.model_dump())
@@ -501,16 +536,15 @@ def chat() -> None:
         try:
             # Get response using shared chat logic
             with console.status("[bold blue]Thinking...", spinner="dots"):
-                response_text = _get_chat_response(
+                response_text, new_history = _get_chat_response(
                     client, system_prompt, conversation_history, question
                 )
 
             # Display assistant response
             console.print(f"\n[bold blue]Assistant:[/bold blue] {response_text}")
 
-            # Update conversation history
-            conversation_history.append({"role": "user", "content": question})
-            conversation_history.append({"role": "assistant", "content": response_text})
+            # Update conversation history with all new messages (includes tool calls)
+            conversation_history.extend(new_history)
 
         except Exception as e:
             console.print(f"\n[bold red]Error:[/bold red] {str(e)}")

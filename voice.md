@@ -46,7 +46,8 @@ Assistant: "The OEE for this week was 78.5%..."
 
 ## Implementation - PR-Sized Chunks
 
-### PR #1: Dependencies and Configuration Setup
+### PR #1: Dependencies and Configuration Setup ✅ COMPLETED
+**Status**: Merged (commit `cbeefdc`)
 **Size**: ~10 lines | **Risk**: Low | **Testable**: Yes
 
 **Files Modified**:
@@ -80,8 +81,9 @@ python -c "import pyaudio; import pydub; import simpleaudio; print('✓ All impo
 
 ---
 
-### PR #2: Audio Recording and Playback Utilities
-**Size**: ~25 lines | **Risk**: Low | **Testable**: Yes
+### PR #2: Audio Recording and Playback Utilities ✅ COMPLETED
+**Status**: Merged and Simplified (commit `0216939`, then `ddf56dd`)
+**Size**: ~156 lines (simplified from original) | **Risk**: Low | **Testable**: Yes
 
 **Files Modified**:
 - `src/main.py`
@@ -177,8 +179,10 @@ Run: `python -m src.main test-audio`
 
 ---
 
-### PR #3: Extract Shared Chat Logic
-**Size**: ~70 lines | **Risk**: Medium | **Testable**: Yes
+### PR #3: Extract Shared Chat Logic ✅ COMPLETED
+**Status**: Ready to merge
+**Size**: +103 lines, -64 lines (net: +39 lines) | **Risk**: Low | **Testable**: Yes
+**Review Scores**: Simplicity 9/10, CLAUDE.md Compliance 92/100
 
 **Files Modified**:
 - `src/main.py`

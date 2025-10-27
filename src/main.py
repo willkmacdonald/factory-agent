@@ -34,72 +34,162 @@ console = Console()
 
 # Audio utility functions for voice interface
 def _record_audio(duration: int = 5) -> Path:
-    """Record audio using PyAudio (cross-platform).
+    """Record audio from microphone and save to temporary WAV file.
+
+    Captures audio in 16kHz mono format optimized for OpenAI Whisper API.
+    Uses PyAudio for cross-platform recording. Caller must delete returned file.
+
+    Code Flow:
+    1. Initialize PyAudio and configure recording parameters (16kHz, mono, 16-bit)
+    2. Open audio input stream and record in 1024-frame chunks
+    3. Clean up PyAudio resources (guaranteed via finally block)
+    4. Write audio data to temporary WAV file and return path
 
     Args:
-        duration: Recording duration in seconds
+        duration: Recording duration in seconds (default: 5)
 
     Returns:
-        Path to temporary WAV file
-    """
-    import pyaudio
+        Path to temporary WAV file (16kHz, mono, 16-bit PCM)
+        Caller must delete file after use with audio_file.unlink()
 
+    Raises:
+        ImportError: If PyAudio not installed (see INSTALL.md)
+        RuntimeError: If microphone access fails or not available
+        OSError: If temporary file cannot be created
+    """
+    try:
+        import pyaudio
+    except ImportError as e:
+        raise ImportError(
+            "PyAudio not installed. Install with:\n"
+            "  macOS: brew install portaudio && pip install pyaudio\n"
+            "  Linux: sudo apt install portaudio19-dev && pip install pyaudio\n"
+            "  Windows: pip install pyaudio"
+        ) from e
+
+    # Configure audio recording (16kHz mono, 16-bit PCM for Whisper)
     CHUNK = 1024
     FORMAT = pyaudio.paInt16
     CHANNELS = 1
-    RATE = 16000  # Whisper-optimized sample rate
+    RATE = 16000
 
-    audio = pyaudio.PyAudio()
-    stream = audio.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        input=True,
-        frames_per_buffer=CHUNK,
-    )
+    audio = None
+    stream = None
+    try:
+        audio = pyaudio.PyAudio()
+        stream = audio.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            frames_per_buffer=CHUNK,
+        )
 
-    frames = []
-    for _ in range(0, int(RATE / CHUNK * duration)):
-        data = stream.read(CHUNK)
-        frames.append(data)
+        # Record audio in chunks
+        frames = []
+        for _ in range(0, int(RATE / CHUNK * duration)):
+            data = stream.read(CHUNK)
+            frames.append(data)
 
-    stream.stop_stream()
-    stream.close()
-    audio.terminate()
+    except OSError as e:
+        raise RuntimeError(
+            f"Microphone access failed. Check:\n"
+            f"  1. Microphone is connected\n"
+            f"  2. Permissions granted\n"
+            f"  3. Not in use by another app\n"
+            f"Error: {e}"
+        ) from e
+    finally:
+        # Always clean up PyAudio resources
+        if stream is not None:
+            stream.stop_stream()
+            stream.close()
+        if audio is not None:
+            audio.terminate()
 
-    # Save to temp file
+    # Write to temporary WAV file
     temp_file = Path(tempfile.mktemp(suffix=".wav"))
-    with wave.open(str(temp_file), "wb") as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(audio.get_sample_size(FORMAT))
-        wf.setframerate(RATE)
-        wf.writeframes(b"".join(frames))
+    try:
+        with wave.open(str(temp_file), "wb") as wf:
+            wf.setnchannels(CHANNELS)
+            wf.setsampwidth(audio.get_sample_size(FORMAT))
+            wf.setframerate(RATE)
+            wf.writeframes(b"".join(frames))
+    except OSError as e:
+        raise OSError(f"Failed to write audio file: {e}") from e
 
     return temp_file
 
 
 def _play_audio(audio_file: Path) -> None:
-    """Play audio file using simpleaudio (cross-platform).
+    """Play audio file through system speakers.
+
+    Loads audio using pydub (supports MP3, WAV, OGG, etc.) and plays via
+    simpleaudio. Requires ffmpeg for non-WAV formats. Blocks until complete.
+
+    Code Flow:
+    1. Verify audio file exists
+    2. Load audio file with pydub (auto-detects format, uses ffmpeg)
+    3. Convert to raw PCM and play through simpleaudio
+    4. Block until playback completes
 
     Args:
-        audio_file: Path to MP3 or WAV file
+        audio_file: Path to audio file (MP3, WAV, OGG, etc.)
+
+    Returns:
+        None (blocks until playback finishes)
+
+    Raises:
+        ImportError: If pydub or simpleaudio not installed (see INSTALL.md)
+        FileNotFoundError: If audio_file does not exist
+        RuntimeError: If playback fails or format unsupported
     """
-    from pydub import AudioSegment
-    import simpleaudio as sa
+    try:
+        from pydub import AudioSegment
+    except ImportError as e:
+        raise ImportError(
+            "pydub not installed. Install with:\n"
+            "  pip install pydub\n"
+            "  Also install ffmpeg:\n"
+            "    macOS: brew install ffmpeg\n"
+            "    Linux: sudo apt install ffmpeg\n"
+            "    Windows: Download from https://ffmpeg.org/"
+        ) from e
 
-    # Load audio (handles MP3, WAV, etc.)
-    audio = AudioSegment.from_file(audio_file)
+    try:
+        import simpleaudio as sa
+    except ImportError as e:
+        raise ImportError(
+            "simpleaudio not installed. Install with:\n" "  pip install simpleaudio"
+        ) from e
 
-    # Convert to WAV in memory for playback
-    playback = sa.play_buffer(
-        audio.raw_data,
-        num_channels=audio.channels,
-        bytes_per_sample=audio.sample_width,
-        sample_rate=audio.frame_rate,
-    )
+    if not audio_file.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_file}")
 
-    # Wait for playback to finish
-    playback.wait_done()
+    try:
+        # Load audio (ffmpeg handles format conversion)
+        audio = AudioSegment.from_file(audio_file)
+
+        # Play audio through default output device
+        playback = sa.play_buffer(
+            audio.raw_data,
+            num_channels=audio.channels,
+            bytes_per_sample=audio.sample_width,
+            sample_rate=audio.frame_rate,
+        )
+
+        # Block until playback completes
+        playback.wait_done()
+
+    except Exception as e:
+        raise RuntimeError(
+            f"Audio playback failed. Check:\n"
+            f"  1. Audio format supported\n"
+            f"  2. ffmpeg installed (for non-WAV)\n"
+            f"  3. Audio device available\n"
+            f"Error: {e}"
+        ) from e
+
 
 # Tool definitions for Claude
 TOOLS = [
@@ -251,9 +341,7 @@ def execute_tool(tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
 @app.command()
 def setup() -> None:
     """Initialize database with synthetic data."""
-    console.print(
-        Panel.fit("🏭 Factory Operations Data Generation", style="bold blue")
-    )
+    console.print(Panel.fit("🏭 Factory Operations Data Generation", style="bold blue"))
 
     initialize_data(days=30)
 
@@ -274,9 +362,7 @@ def chat() -> None:
 
     # Check if data exists
     if not data_exists():
-        console.print(
-            "❌ Data not found. Please run 'setup' first.", style="bold red"
-        )
+        console.print("❌ Data not found. Please run 'setup' first.", style="bold red")
         raise typer.Exit(1)
 
     # Load data to get date range
@@ -397,9 +483,7 @@ based on the data available."""
 def stats() -> None:
     """Show data statistics."""
     if not data_exists():
-        console.print(
-            "❌ Data not found. Please run 'setup' first.", style="bold red"
-        )
+        console.print("❌ Data not found. Please run 'setup' first.", style="bold red")
         raise typer.Exit(1)
 
     data = load_data()

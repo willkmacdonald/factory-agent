@@ -191,6 +191,100 @@ def _play_audio(audio_file: Path) -> None:
         ) from e
 
 
+# Shared chat logic for text and voice interfaces
+def _build_system_prompt() -> str:
+    """Build system prompt with factory context and tool definitions.
+
+    Loads production data and constructs a complete system prompt for Claude
+    with date range, available machines, and instructions for answering questions.
+
+    Returns:
+        Complete system prompt string with factory context
+    """
+    data = load_data()
+    start_date = data["start_date"].split("T")[0]
+    end_date = data["end_date"].split("T")[0]
+    machines = ", ".join([m["name"] for m in MACHINES])
+
+    return f"""You are a factory operations assistant for {FACTORY_NAME}.
+
+You have access to 30 days of production data ({start_date} to {end_date}) covering:
+- 4 machines: {machines}
+- 2 shifts: Day (6am-2pm) and Night (2pm-10pm)
+- Metrics: OEE, scrap, quality issues, downtime
+
+When answering:
+1. Use tools to get accurate data
+2. Provide specific numbers and percentages
+3. Explain trends and patterns
+4. Compare metrics when relevant
+5. Be concise but thorough
+
+Today's date is {datetime.now().strftime('%Y-%m-%d')}. When users ask about \
+"today", "this week", or relative dates, calculate the appropriate date range \
+based on the data available."""
+
+
+def _get_chat_response(
+    client: OpenAI,
+    system_prompt: str,
+    conversation_history: List[Dict[str, Any]],
+    user_message: str,
+) -> str:
+    """Get Claude response with tool calling support.
+
+    Manages the complete tool-calling loop: sends message to Claude, executes
+    any requested tools, and returns final text response. Handles multiple
+    tool call iterations automatically.
+
+    Args:
+        client: OpenAI client configured for OpenRouter
+        system_prompt: System prompt with factory context
+        conversation_history: List of previous conversation messages
+        user_message: Current user message to process
+
+    Returns:
+        Final assistant response text after all tool calls complete
+    """
+    # Build messages list with system prompt, history, and new message
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(conversation_history)
+    messages.append({"role": "user", "content": user_message})
+
+    # Tool calling loop - continues until Claude provides final answer
+    while True:
+        response = client.chat.completions.create(
+            model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto"
+        )
+
+        message = response.choices[0].message
+
+        # If no tool calls, we have the final answer
+        if not message.tool_calls:
+            return message.content
+
+        # Add assistant message with tool calls to history
+        messages.append(message.model_dump())
+
+        # Execute each requested tool
+        for tool_call in message.tool_calls:
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
+
+            # Execute tool and get result
+            result = execute_tool(tool_name, tool_args)
+
+            # Add tool result to messages
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_name,
+                    "content": json.dumps(result),
+                }
+            )
+
+
 # Tool definitions for Claude
 TOOLS = [
     {
@@ -365,29 +459,11 @@ def chat() -> None:
         console.print("❌ Data not found. Please run 'setup' first.", style="bold red")
         raise typer.Exit(1)
 
-    # Load data to get date range
+    # Build system prompt and get date range for display
+    system_prompt = _build_system_prompt()
     data = load_data()
     start_date = data["start_date"].split("T")[0]
     end_date = data["end_date"].split("T")[0]
-
-    # Build system prompt with context
-    system_prompt = f"""You are a factory operations assistant for {FACTORY_NAME}.
-
-You have access to 30 days of production data ({start_date} to {end_date}) covering:
-- 4 machines: {', '.join([m['name'] for m in MACHINES])}
-- 2 shifts: Day (6am-2pm) and Night (2pm-10pm)
-- Metrics: OEE, scrap, quality issues, downtime
-
-When answering:
-1. Use tools to get accurate data
-2. Provide specific numbers and percentages
-3. Explain trends and patterns
-4. Compare metrics when relevant
-5. Be concise but thorough
-
-Today's date is {datetime.now().strftime('%Y-%m-%d')}. When users ask about \
-"today", "this week", or relative dates, calculate the appropriate date range \
-based on the data available."""
 
     # Display welcome panel
     console.print(
@@ -423,55 +499,18 @@ based on the data available."""
             continue
 
         try:
-            # Build messages list
-            messages = [{"role": "system", "content": system_prompt}]
-            messages.extend(conversation_history)
-            messages.append({"role": "user", "content": question})
-
-            # Call Claude API with status indicator
+            # Get response using shared chat logic
             with console.status("[bold blue]Thinking...", spinner="dots"):
-                response = client.chat.completions.create(
-                    model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto"
+                response_text = _get_chat_response(
+                    client, system_prompt, conversation_history, question
                 )
-
-            # Handle tool calls in a loop
-            while response.choices[0].finish_reason == "tool_calls":
-                assistant_message = response.choices[0].message
-                messages.append(assistant_message.model_dump())
-
-                # Execute each tool call
-                for tool_call in assistant_message.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_args = json.loads(tool_call.function.arguments)
-
-                    # Execute the tool
-                    result = execute_tool(tool_name, tool_args)
-
-                    # Add tool response to messages
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "name": tool_name,
-                            "content": json.dumps(result),
-                        }
-                    )
-
-                # Continue conversation with tool results
-                response = client.chat.completions.create(
-                    model=MODEL, messages=messages, tools=TOOLS, tool_choice="auto"
-                )
-
-            # Extract final response
-            response_text = response.choices[0].message.content
-
-            # Update conversation history
-            conversation_history = messages[1:] + [
-                {"role": "assistant", "content": response_text}
-            ]
 
             # Display assistant response
             console.print(f"\n[bold blue]Assistant:[/bold blue] {response_text}")
+
+            # Update conversation history
+            conversation_history.append({"role": "user", "content": question})
+            conversation_history.append({"role": "assistant", "content": response_text})
 
         except Exception as e:
             console.print(f"\n[bold red]Error:[/bold red] {str(e)}")

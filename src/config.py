@@ -1,4 +1,5 @@
 """Configuration settings for the factory operations chatbot."""
+
 import os
 from typing import Optional
 from dotenv import load_dotenv

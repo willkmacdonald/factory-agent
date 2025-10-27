@@ -1,16 +1,18 @@
 # Factory Operations Chatbot
 
-A console-based AI chatbot demo that answers factory operations questions using Claude's tool-calling capabilities via OpenRouter with synthetic manufacturing data.
+A dual-interface AI demonstration system for factory operations analysis, featuring both an AI-powered chatbot and interactive web dashboard. Built with Claude's tool-calling capabilities via OpenRouter, using synthetic manufacturing data.
 
 ## Features
 
-- AI-Powered Chatbot using Claude 3.5 Sonnet via OpenRouter
-- Manufacturing Metrics: OEE, scrap, quality, downtime analysis
-- 30 days of synthetic factory data with interesting scenarios
-- Beautiful CLI built with Typer and Rich
-- Simple JSON data storage (no database required)
-- Interactive natural language queries with tool-calling
-- 4 analysis tools for accurate data retrieval
+- **AI-Powered Chatbot** using Claude 3.5 Sonnet via OpenRouter
+- **Interactive Web Dashboard** with Streamlit for visual analytics
+- **Manufacturing Metrics**: OEE, scrap, quality, downtime analysis
+- **30 days of synthetic factory data** with interesting planted scenarios
+- **Beautiful CLI** built with Typer and Rich
+- **Simple JSON data storage** (no database required)
+- **Interactive natural language queries** with tool-calling
+- **4 analysis tools** for accurate data retrieval
+- **Visual dashboards** with Plotly charts for OEE, availability, and quality metrics
 
 ## Tech Stack
 
@@ -18,6 +20,8 @@ A console-based AI chatbot demo that answers factory operations questions using 
 - **OpenRouter API** - Claude 3.5 Sonnet with tool-calling
 - **Typer** - CLI framework
 - **Rich** - Beautiful terminal formatting
+- **Streamlit** - Interactive web dashboard framework
+- **Plotly** - Interactive data visualization
 - **OpenAI SDK** - Client library for OpenRouter API
 
 ## Installation
@@ -40,15 +44,15 @@ cp .env.example .env
 ## Usage
 
 ### Setup
-Generate synthetic factory data:
+Generate synthetic factory data (required for both chatbot and dashboard):
 ```bash
 python -m src.main setup
 ```
 
 This creates 30 days of production data with planted scenarios and saves it to `data/production.json`.
 
-### Chat
-Launch the interactive chatbot:
+### Chat Interface
+Launch the interactive AI chatbot:
 ```bash
 python -m src.main chat
 ```
@@ -66,6 +70,25 @@ Assistant: [Uses get_quality_issues tool and explains the quality spike]
 
 Type `exit`, `quit`, or press Ctrl+C to end the chat session.
 
+### Web Dashboard
+Launch the interactive web dashboard:
+```bash
+python run_dashboard.py
+```
+
+Or directly with Streamlit:
+```bash
+streamlit run src/dashboard.py
+```
+
+The dashboard opens automatically in your browser at `http://localhost:8501` and provides:
+
+- **OEE Dashboard**: Gauge chart showing current OEE percentage and trend line over 30 days
+- **Availability Dashboard**: Downtime analysis by reason and major downtime events table
+- **Quality Dashboard**: Scrap rate trends and quality issues with severity highlighting
+
+Use the sidebar to filter metrics by specific machines or view all machines combined.
+
 ### Stats
 View data statistics:
 ```bash
@@ -74,7 +97,7 @@ python -m src.main stats
 
 Displays a summary table with date range, number of days, machines, and shifts.
 
-## Example Questions
+## Example Questions (Chatbot Interface)
 
 - "What was our OEE this week?"
 - "Show me quality issues from day 15"
@@ -82,6 +105,22 @@ Displays a summary table with date range, number of days, machines, and shifts.
 - "Compare day shift vs night shift performance"
 - "What happened on day 22?"
 - "Analyze scrap rates for Assembly-001"
+
+## Dashboard Features
+
+The web dashboard provides three interactive tabs:
+
+### OEE Tab
+- **Gauge Chart**: Current OEE percentage with color-coded performance zones (red: 0-60%, yellow: 60-75%, green: 75-100%)
+- **Trend Chart**: 30-day OEE performance trend line showing improvement over time
+
+### Availability Tab
+- **Downtime Bar Chart**: Total downtime hours aggregated by reason (changeover, maintenance, breakdown, etc.)
+- **Major Events Table**: Detailed view of significant downtime events (>2 hours) including the Day 22 bearing failure
+
+### Quality Tab
+- **Scrap Rate Trend**: Daily scrap rate percentage over 30 days with area fill
+- **Quality Issues Table**: Comprehensive list of defects with severity color-coding (High: red, Medium: yellow, Low: green)
 
 ## Analysis Tools
 
@@ -112,33 +151,58 @@ factory-agent/
 │   ├── config.py           # Configuration (11 lines)
 │   ├── data.py             # Data storage and generation (217 lines)
 │   ├── metrics.py          # Analysis functions (276 lines)
-│   └── main.py             # CLI interface and chatbot (352 lines)
+│   ├── main.py             # CLI interface and chatbot (352 lines)
+│   └── dashboard.py        # Streamlit web dashboard (226 lines)
 ├── data/
 │   └── production.json     # Generated synthetic data
+├── run_dashboard.py        # Dashboard launcher script
 ├── .env.example            # Environment variable template
 ├── .gitignore              # Git ignore rules
-├── requirements.txt        # Python dependencies (4 packages)
+├── requirements.txt        # Python dependencies (6 packages)
 ├── implementation-plan.md  # Development roadmap
+├── dashboards.md           # Dashboard implementation plan
 └── README.md              # This file
 ```
 
-**Total implementation**: ~850 lines across 4 modules
+**Total implementation**: ~1,100 lines across 5 core modules
 
 ## How It Works
+
+### Core Components
 
 1. **Data Generation** (`src/data.py`): Creates 30 days of realistic factory data with planted scenarios
 2. **Metrics Engine** (`src/metrics.py`): Provides 4 analysis functions that process the data
 3. **CLI Interface** (`src/main.py`): Typer-based commands with Rich formatting
-4. **Tool-Calling Pattern**: Claude receives tool definitions, calls them with arguments, and synthesizes responses
-5. **Conversation Loop**: Maintains history and handles multi-turn tool calling
+4. **Web Dashboard** (`src/dashboard.py`): Streamlit app with Plotly visualizations
+5. **Tool-Calling Pattern**: Claude receives tool definitions, calls them with arguments, and synthesizes responses
+6. **Conversation Loop**: Maintains history and handles multi-turn tool calling
+
+### Architecture Flow
+
+```
+Chatbot Interface:
+User Question → Claude API (OpenRouter) → Tool Selection → Metrics Functions → JSON Data → Response
+
+Dashboard Interface:
+User Interaction → Streamlit UI → Metrics Functions → JSON Data → Plotly Charts
+```
+
+Both interfaces share the same underlying metrics engine and data storage, ensuring consistency.
 
 ## Development Notes
 
 This is a demo/prototype project built following simplicity-first principles:
-- JSON files instead of database (easier to inspect and debug)
-- Synchronous I/O (appropriate for single-user CLI demos)
-- No complex testing infrastructure (manual testing)
-- ~850 lines total (vs 2,000+ in initial design)
+- **JSON files** instead of database (easier to inspect and debug)
+- **Synchronous I/O** (appropriate for single-user demos)
+- **No complex testing infrastructure** (manual testing sufficient)
+- **Shared metrics layer** (both interfaces use the same analysis functions)
+- **Streamlit for dashboards** (Python-native, zero JavaScript required)
+- **~1,100 lines total** (compact and maintainable)
+
+### Design Philosophy
+- Chatbot for **exploratory analysis** and natural language queries
+- Dashboard for **visual analysis** and at-a-glance metrics
+- Both interfaces complement each other for comprehensive factory operations monitoring
 
 ## License
 
